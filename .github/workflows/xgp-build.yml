@@ -1,4 +1,4 @@
-name: XGPv3 Build
+name: XGPv3 + Photonicat2 Build
 
 on:
   workflow_dispatch:
@@ -8,14 +8,98 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: dual-firmware-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-24.04
+    outputs:
+      synced_sha: ${{ steps.sync.outputs.synced_sha }}
+      upstream_sha: ${{ steps.sync.outputs.upstream_sha }}
+    env:
+      UPSTREAM_REPO: https://github.com/coolsnowwolf/lede.git
+      UPSTREAM_BRANCH: master
+    steps:
+      - name: Checkout LEDE fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: lede
+
+      - name: Sync latest upstream source
+        id: sync
+        working-directory: lede
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          custom_dir=/tmp/xgp-custom
+          upstream_dir=/tmp/lede-upstream
+          rm -rf "$custom_dir" "$upstream_dir"
+
+          for path in \
+            .github/workflows/xgp-build.yml \
+            feeds.conf.default \
+            xgp.config \
+            scripts/xgp-prepare.sh \
+            scripts/xgp-build.sh \
+            scripts/pcat-prepare.sh \
+            scripts/pcat-build.sh \
+            scripts/xgp-apply-patches.sh; do
+            mkdir -p "$custom_dir/$(dirname "$path")"
+            cp "$path" "$custom_dir/$path"
+          done
+
+          git clone --depth 1 --branch "$UPSTREAM_BRANCH" "$UPSTREAM_REPO" "$upstream_dir"
+          UPSTREAM_SHA=$(git -C "$upstream_dir" rev-parse HEAD)
+          rsync -a --delete --exclude='.git/' "$upstream_dir/" ./
+
+          for path in \
+            .github/workflows/xgp-build.yml \
+            feeds.conf.default \
+            xgp.config \
+            scripts/xgp-prepare.sh \
+            scripts/xgp-build.sh \
+            scripts/pcat-prepare.sh \
+            scripts/pcat-build.sh \
+            scripts/xgp-apply-patches.sh; do
+            mkdir -p "$(dirname "$path")"
+            cp "$custom_dir/$path" "$path"
+          done
+
+          bash scripts/xgp-apply-patches.sh
+          git diff --check
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync upstream LEDE $UPSTREAM_SHA"
+          fi
+          git push origin HEAD:master
+          echo "synced_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: sync
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: xgpv3
+            label: XGP V3
+            prepare_script: xgp-prepare.sh
+            build_script: xgp-build.sh
+            image_glob: '*nlnet_xiguapi-v3*.img.gz'
+          - id: photonicat2
+            label: Photonicat 2
+            prepare_script: pcat-prepare.sh
+            build_script: pcat-build.sh
+            image_glob: '*ariaboard_photonicat2*.img.gz'
     env:
       TZ: Asia/Shanghai
       FORCE_UNSAFE_CONFIGURE: 1
       UPSTREAM_REPO: https://github.com/coolsnowwolf/lede.git
-      UPSTREAM_BRANCH: master
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -37,62 +121,13 @@ jobs:
           df -h
           free -h
 
-      - name: Checkout LEDE fork
+      - name: Checkout synced LEDE source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ needs.sync.outputs.synced_sha }}
           path: lede
 
-      - name: Sync latest upstream source
-        working-directory: lede
-        run: |
-          set -e
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          custom_dir=/tmp/xgp-custom
-          upstream_dir=/tmp/lede-upstream
-          rm -rf "$custom_dir" "$upstream_dir"
-
-          for path in \
-            .github/workflows/xgp-build.yml \
-            feeds.conf.default \
-            xgp.config \
-            scripts/xgp-prepare.sh \
-            scripts/xgp-build.sh \
-            scripts/xgp-apply-patches.sh; do
-            mkdir -p "$custom_dir/$(dirname "$path")"
-            cp "$path" "$custom_dir/$path"
-          done
-
-          git clone --depth 1 --branch "$UPSTREAM_BRANCH" "$UPSTREAM_REPO" "$upstream_dir"
-          UPSTREAM_SHA=$(git -C "$upstream_dir" rev-parse HEAD)
-          rsync -a --delete --exclude='.git/' "$upstream_dir/" ./
-
-          for path in \
-            .github/workflows/xgp-build.yml \
-            feeds.conf.default \
-            xgp.config \
-            scripts/xgp-prepare.sh \
-            scripts/xgp-build.sh \
-            scripts/xgp-apply-patches.sh; do
-            mkdir -p "$(dirname "$path")"
-            cp "$custom_dir/$path" "$path"
-          done
-
-          bash scripts/xgp-apply-patches.sh
-          git diff --check -- scripts/xgp-apply-patches.sh
-
-          git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Sync upstream LEDE $UPSTREAM_SHA"
-          fi
-          git push origin HEAD:master
-          echo "SYNCED_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "UPSTREAM_SHA=$UPSTREAM_SHA" >> "$GITHUB_ENV"
-          echo "Synced source commit: $(git rev-parse HEAD)"
-          echo "Upstream source: $UPSTREAM_SHA"
-
-      - name: Install build deps (minimal, no texlive)
+      - name: Install build deps
         run: |
           set -e
           sudo apt-get update -y
@@ -120,157 +155,126 @@ jobs:
             lede/staging_dir/host
             lede/staging_dir/hostpkg
             lede/staging_dir/toolchain-*
-          key: xgp-${{ runner.os }}-${{ hashFiles('lede/feeds.conf.default', 'lede/xgp.config') }}
+          key: ${{ matrix.id }}-${{ runner.os }}-${{ needs.sync.outputs.upstream_sha }}-${{ hashFiles('lede/feeds.conf.default', 'lede/xgp.config') }}
+          restore-keys: |
+            ${{ matrix.id }}-${{ runner.os }}-
 
-      - name: Prepare feeds / packages / files
+      - name: Prepare ${{ matrix.label }}
         working-directory: lede
         run: |
           set -e
-          bash scripts/xgp-prepare.sh
-          alpha_config_file=package/zz/luci-app-alpha-config/Makefile
-          test -f "$alpha_config_file"
-          grep -Fxq 'PKG_NAME:=luci-app-alpha-config' "$alpha_config_file"
-          grep -Fxq 'LUCI_PKGARCH:=all' "$alpha_config_file"
-          grep -Fxq 'CONFIG_PACKAGE_luci-app-alpha-config=y' xgp.config
-          grep -Fxq 'CONFIG_PACKAGE_luci-theme-alpha=y' xgp.config
+          bash "scripts/${{ matrix.prepare_script }}"
+          if [ "${{ matrix.id }}" = "xgpv3" ]; then
+            test -f package/zz/luci-app-alpha-config/Makefile
+            grep -Fxq 'CONFIG_PACKAGE_luci-app-alpha-config=y' xgp.config
+            grep -Fxq 'CONFIG_PACKAGE_luci-theme-alpha=y' xgp.config
+          else
+            test -f package/lean/pcat-manager/Makefile
+            test -f package/lean/pcat-manager-web/Makefile
+            test -f package/lean/pcat2-display-mini/Makefile
+            test -s .pcat-source-sha
+          fi
           df -h
 
-      - name: Preflight mac80211 package wiring
+      - name: Preflight XGP compatibility patches
+        if: matrix.id == 'xgpv3'
         working-directory: lede
         run: |
           set -euo pipefail
-          mac80211_file=package/kernel/mac80211/Makefile
-          realtek_file=package/kernel/mac80211/realtek.mk
-          alpha_config_file=package/zz/luci-app-alpha-config/Makefile
+          test -f package/kernel/mac80211/Makefile
+          test -f package/kernel/mac80211/realtek.mk
+          grep -Fq 'KLIB_BUILD="$(LINUX_DIR)"' package/kernel/mac80211/Makefile
+          grep -Fq 'PKG_DRIVERS += rtl8192d-common rtw88-8723x rtw89-8852b-common' package/kernel/mac80211/realtek.mk
 
-          test -f "$mac80211_file"
-          test -f "$realtek_file"
-          test -f "$alpha_config_file"
-          grep -Fxq 'PKG_NAME:=luci-app-alpha-config' "$alpha_config_file"
-          grep -Fxq 'LUCI_PKGARCH:=all' "$alpha_config_file"
-
-          # Match the build script's feed setup before parsing LuCI packages.
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          ./scripts/feeds install -a -f -p qmodem
-          test -f feeds/luci/luci.mk
-          cp xgp.config .config
-          make defconfig
-
-          if ! grep -Fxq 'CONFIG_PACKAGE_luci-app-alpha-config=y' .config; then
-            echo 'ERROR: luci-app-alpha-config is not selected after defconfig.' >&2
-            exit 1
-          fi
-          if ! grep -Fxq 'CONFIG_PACKAGE_luci-theme-alpha=y' .config; then
-            echo 'ERROR: luci-theme-alpha is not selected after defconfig.' >&2
-            exit 1
-          fi
-
-          if ! grep -Fq 'KLIB_BUILD="$(LINUX_DIR)"' "$mac80211_file"; then
-            echo 'ERROR: mac80211 Makefile no longer wires KLIB_BUILD to the target kernel.' >&2
-            exit 1
-          fi
-
-          if ! grep -Fq '$(eval $(foreach drv,$(PKG_DRIVERS),$(call KernelPackage,$(drv))))' "$mac80211_file"; then
-            echo 'ERROR: mac80211 Makefile no longer has the unified driver registration pass.' >&2
-            exit 1
-          fi
-
-          if grep -Eq '^\s*\$\(eval \$\(call KernelPackage,(rtl8192d-common|rtw88-8723x|rtw89-8852b-common)\)\)' "$realtek_file"; then
-            echo 'ERROR: XGP compatibility drivers are being registered before MAKE_OPTS is defined.' >&2
-            exit 1
-          fi
-
-          grep -Fq 'PKG_DRIVERS += rtl8192d-common rtw88-8723x rtw89-8852b-common' "$realtek_file"
-          grep -Fq 'rtlwifi/rtl8192d/rtl8192d-common.ko' "$realtek_file"
-
-          rtl8192de_block=$(sed -n '/^define KernelPackage\/rtl8192de$/,/^endef$/p' "$realtek_file")
-          if [[ -z "$rtl8192de_block" ]]; then
-            echo 'ERROR: rtl8192de package definition is missing.' >&2
-            exit 1
-          fi
-          if ! grep -Eq 'DEPENDS.*\+kmod-rtl8192d-common' <<<"$rtl8192de_block"; then
-            echo 'ERROR: rtl8192de does not declare its rtl8192d-common module dependency.' >&2
-            exit 1
-          fi
-
-          rtw88_8723d_block=$(sed -n '/^define KernelPackage\/rtw88-8723d$/,/^endef$/p' "$realtek_file")
-          if [[ -z "$rtw88_8723d_block" ]]; then
-            echo 'ERROR: rtw88-8723d package definition is missing.' >&2
-            exit 1
-          fi
-          if ! grep -Eq 'DEPENDS.*\+kmod-rtw88-8723x' <<<"$rtw88_8723d_block"; then
-            echo 'ERROR: rtw88-8723d does not declare its rtw88-8723x module dependency.' >&2
-            exit 1
-          fi
-
-          rtw89_8852be_block=$(sed -n '/^define KernelPackage\/rtw89-8852be$/,/^endef$/p' "$realtek_file")
-          if [[ -z "$rtw89_8852be_block" ]]; then
-            echo 'ERROR: rtw89-8852be package definition is missing.' >&2
-            exit 1
-          fi
-          if ! grep -Eq 'DEPENDS.*\+kmod-rtw89-8852b-common' <<<"$rtw89_8852be_block"; then
-            echo 'ERROR: rtw89-8852be does not declare its 8852b common-module dependency.' >&2
-            exit 1
-          fi
-
-          echo 'mac80211 package wiring is valid; no compile recipe was executed during preflight.'
-
-      - name: Build
+      - name: Build ${{ matrix.label }}
         working-directory: lede
         run: |
           set -e
-          bash scripts/xgp-build.sh
+          bash "scripts/${{ matrix.build_script }}"
           df -h
 
-      - name: Collect artifacts
+      - name: Collect ${{ matrix.label }} artifacts
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p release_assets
-          cp lede/bin/targets/rockchip/armv8/*.img.gz release_assets/
-          cp lede/bin/targets/rockchip/armv8/*.manifest release_assets/ || true
-          cp lede/bin/targets/rockchip/armv8/config.buildinfo release_assets/ || true
-          cp lede/bin/targets/rockchip/armv8/feeds.buildinfo release_assets/ || true
-          cp lede/bin/targets/rockchip/armv8/version.buildinfo release_assets/ || true
-          cp lede/bin/targets/rockchip/armv8/sha256sums release_assets/ || true
-          cp lede/.config release_assets/xgp.config.final
-          cp lede/feeds.conf release_assets/feeds.conf.final
+          image_pattern="lede/bin/targets/rockchip/armv8/${{ matrix.image_glob }}"
+          compgen -G "$image_pattern" >/dev/null
+          cp $image_pattern release_assets/
+
+          for manifest in lede/bin/targets/rockchip/armv8/*.manifest; do
+            [ -e "$manifest" ] || continue
+            cp "$manifest" "release_assets/${{ matrix.id }}-$(basename "$manifest")"
+          done
+
+          for metadata in config.buildinfo feeds.buildinfo version.buildinfo sha256sums; do
+            source_file="lede/bin/targets/rockchip/armv8/$metadata"
+            [ ! -f "$source_file" ] || cp "$source_file" "release_assets/${{ matrix.id }}-$metadata"
+          done
+
+          cp lede/.config "release_assets/${{ matrix.id }}.config.final"
+          cp lede/feeds.conf "release_assets/${{ matrix.id }}.feeds.conf.final"
+          [ ! -s lede/.pcat-source-sha ] || cp lede/.pcat-source-sha release_assets/photonicat-openwrt.source
           cp lede/README.md release_assets/LEDE-README.md || true
           cp lede/LICENSE release_assets/LEDE-LICENSE || true
           curl -fsSL https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt \
             -o release_assets/GPL-2.0.txt
-          test -s release_assets/GPL-2.0.txt
-          printf 'AppleCampus/lede commit: %s\nUpstream source: %s\nBuild run: %s\n' \
-            "$SYNCED_SHA" \
-            "$UPSTREAM_REPO@$UPSTREAM_SHA" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            > release_assets/SOURCE-OFFER.txt
-          sha256sum release_assets/*.img.gz > release_assets/sha256sums.release
-          ls -lah release_assets
-          test -n "$(ls release_assets/*.img.gz)"
 
-      - name: Upload artifact
+          {
+            printf 'AppleCampus/LEDE commit: %s\n' '${{ needs.sync.outputs.synced_sha }}'
+            printf 'LEDE upstream: %s@%s\n' "$UPSTREAM_REPO" '${{ needs.sync.outputs.upstream_sha }}'
+            printf 'Build target: %s\n' '${{ matrix.label }}'
+            printf 'Build run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            if [ -s lede/.pcat-source-sha ]; then
+              printf 'Photonicat packages: https://github.com/photonicat/photonicat_openwrt@%s\n' "$(cat lede/.pcat-source-sha)"
+            fi
+          } > "release_assets/${{ matrix.id }}-SOURCE-OFFER.txt"
+
+          sha256sum release_assets/*.img.gz > "release_assets/${{ matrix.id }}.sha256sums"
+          ls -lah release_assets
+
+      - name: Upload ${{ matrix.label }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xgpv3-firmware
+          name: ${{ matrix.id }}-firmware
           path: release_assets/
           if-no-files-found: error
 
-      - name: Create Release
+  release:
+    needs:
+      - sync
+      - build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download both firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-firmware'
+          path: release_assets
+          merge-multiple: true
+
+      - name: Verify release contents
+        run: |
+          set -e
+          test -n "$(find release_assets -maxdepth 1 -name '*nlnet_xiguapi-v3*.img.gz' -print -quit)"
+          test -n "$(find release_assets -maxdepth 1 -name '*ariaboard_photonicat2*.img.gz' -print -quit)"
+          ls -lah release_assets
+
+      - name: Create combined Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: xgp-${{ github.run_number }}-${{ github.run_id }}
-          target_commitish: ${{ env.SYNCED_SHA }}
-          name: XGPv3 ${{ github.run_number }} (${{ env.SYNCED_SHA }})
+          tag_name: firmware-${{ github.run_number }}-${{ github.run_id }}
+          target_commitish: ${{ needs.sync.outputs.synced_sha }}
+          name: XGPv3 + Photonicat2 ${{ github.run_number }}
           body: |
-            ## XGP V3 firmware
+            ## XGP V3 and Photonicat 2 firmware
 
-            Built from AppleCampus/lede commit `${{ env.SYNCED_SHA }}` after syncing upstream commit `${{ env.UPSTREAM_SHA }}`.
+            Both images are built from AppleCampus/XGPV3-LEDE commit ${{ needs.sync.outputs.synced_sha }}, after syncing coolsnowwolf/lede commit ${{ needs.sync.outputs.upstream_sha }}.
 
-            Includes XGP V3 screen support and the full Wi-Fi driver set, including MT7922 firmware support.
+            - XGP V3 keeps the existing screen, Alpha theme, modem and Wi-Fi customizations.
+            - Photonicat 2 includes the official pcat-manager, pcat-manager-web and mini-display packages. The Photonicat WebUI uses port 80 and its OpenWrt entry opens LuCI on port 8080.
+            - Photonicat 2 defaults to 172.16.0.1 with root password photonicat, matching the official firmware.
 
-            License: GNU General Public License v2.0 (GPL-2.0).
-            The release includes the complete `GPL-2.0.txt`, source/config metadata, and checksums.
+            License and source metadata are included with the images.
           files: release_assets/*
           generate_release_notes: true
         env:
