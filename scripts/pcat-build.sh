@@ -42,6 +42,7 @@ fi
 grep -Fxq 'CONFIG_PACKAGE_pcat-manager=y' .config
 grep -Fxq 'CONFIG_PACKAGE_pcat-manager-web=y' .config
 grep -Fxq 'CONFIG_PACKAGE_pcat2-display-mini=y' .config
+grep -Fxq 'CONFIG_PACKAGE_kmod-aic8800-usb=y' .config
 
 year=$(date +%y)
 month=$(date +%-m)
@@ -60,11 +61,28 @@ if [ -s .pcat-source-sha ]; then
   echo "ZZ_BUILD_PHOTONICAT_HASH='$(cat .pcat-source-sha)'" >> files/etc/zz_build_id
 fi
 
-echo "==> download"
-make download -j8
+jobs=$(nproc)
 
-echo "==> compile"
-make V=s -j"$(nproc)"
+run_checked() {
+  local target="$1"
+  local label="$2"
+
+  echo "==> preflight: ${label}"
+  if ! make "${target}" -j"${jobs}"; then
+    echo "::error::${label} failed in parallel; retrying with -j1 V=s for an actionable log"
+    make "${target}" -j1 V=s
+  fi
+}
+
+echo "==> download"
+make download -j8 || make download -j1 V=s
+
+run_checked tools/compile "host tools"
+run_checked toolchain/compile "cross toolchain"
+run_checked package/pcat-manager/compile "pcat-manager"
+run_checked package/pcat-manager-web/compile "pcat-manager-web"
+run_checked package/pcat2-display-mini/compile "pcat2-display-mini"
+run_checked world "Photonicat 2 firmware"
 
 echo "==> outputs"
 ls -lah bin/targets/rockchip/armv8/ || true
