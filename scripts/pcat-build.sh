@@ -6,8 +6,18 @@ cd "$ROOT"
 
 echo "==> feeds update/install"
 ./scripts/feeds update -a
-./scripts/feeds install -a
+while read -r feed_name; do
+  ./scripts/feeds install -a -p "${feed_name}"
+done < <(awk '$1 ~ /^src-/ && $2 != "qmodem" && $2 != "pcat_packages" { print $2 }' feeds.conf)
 ./scripts/feeds install -a -f -p qmodem
+./scripts/feeds install -f -p pcat_packages \
+  python3-legacy-cgi python3-blinker python3-pam
+
+git -C feeds/pcat_packages rev-parse HEAD > .pcat-packages-sha
+
+for dependency in python-legacy-cgi python-blinker python-pam; do
+  test -f "package/feeds/pcat_packages/${dependency}/Makefile"
+done
 
 echo "==> apply Photonicat 2 config"
 cp xgp.config .config
@@ -59,6 +69,9 @@ echo "ZZ_BUILD_HOST='$(hostname)'" >> files/etc/zz_build_id
 echo "ZZ_BUILD_LEDE_HASH='$(git rev-parse HEAD)'" >> files/etc/zz_build_id
 if [ -s .pcat-source-sha ]; then
   echo "ZZ_BUILD_PHOTONICAT_HASH='$(cat .pcat-source-sha)'" >> files/etc/zz_build_id
+fi
+if [ -s .pcat-packages-sha ]; then
+  echo "ZZ_BUILD_PHOTONICAT_PACKAGES_HASH='$(cat .pcat-packages-sha)'" >> files/etc/zz_build_id
 fi
 
 jobs=$(nproc)
