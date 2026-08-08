@@ -2,6 +2,16 @@ name: XGPv3 + Photonicat2 Build
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Firmware target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - photonicat2
+          - xgpv3
   schedule:
     - cron: '0 18 * * 4'
 
@@ -102,6 +112,7 @@ jobs:
       UPSTREAM_REPO: https://github.com/coolsnowwolf/lede.git
     steps:
       - name: Maximize build space
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: 4096
@@ -113,6 +124,7 @@ jobs:
           remove-docker-images: 'true'
 
       - name: Free more space + show disk
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         run: |
           set -e
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -122,16 +134,34 @@ jobs:
           free -h
 
       - name: Checkout synced LEDE source
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.sync.outputs.synced_sha }}
           path: lede
 
+      - name: Validate build scripts
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
+        working-directory: lede
+        run: |
+          set -euo pipefail
+          bash -n scripts/xgp-prepare.sh
+          bash -n scripts/xgp-build.sh
+          bash -n scripts/pcat-prepare.sh
+          bash -n scripts/pcat-build.sh
+          bash -n scripts/xgp-apply-patches.sh
+          git diff --check
+
       - name: Install build deps
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         run: |
           set -e
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            antlr3 asciidoc autoconf automake autopoint binutils bzip2 cpio \
+            gperf haveged help2man intltool libfuse-dev libglib2.0-dev \
+            libltdl-dev libpython3-dev libreadline-dev libtool lrzsz \
+            p7zip-full scons subversion texinfo uglifyjs xmlto xxd \
             build-essential clang flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git \
             libncurses5-dev libncursesw5-dev libssl-dev \
@@ -148,6 +178,7 @@ jobs:
           df -h
 
       - name: Cache dl / staging
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         uses: actions/cache@v4
         with:
           path: |
@@ -160,6 +191,7 @@ jobs:
             ${{ matrix.id }}-${{ runner.os }}-
 
       - name: Prepare ${{ matrix.label }}
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         working-directory: lede
         run: |
           set -e
@@ -177,7 +209,7 @@ jobs:
           df -h
 
       - name: Preflight XGP compatibility patches
-        if: matrix.id == 'xgpv3'
+        if: (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'xgpv3'
         working-directory: lede
         run: |
           set -euo pipefail
@@ -187,6 +219,7 @@ jobs:
           grep -Fq 'PKG_DRIVERS += rtl8192d-common rtw88-8723x rtw89-8852b-common' package/kernel/mac80211/realtek.mk
 
       - name: Build ${{ matrix.label }}
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         working-directory: lede
         run: |
           set -e
@@ -194,6 +227,7 @@ jobs:
           df -h
 
       - name: Collect ${{ matrix.label }} artifacts
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         run: |
           set -euo pipefail
           mkdir -p release_assets
@@ -233,6 +267,7 @@ jobs:
           ls -lah release_assets
 
       - name: Upload ${{ matrix.label }} artifact
+        if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.id }}-firmware
@@ -240,6 +275,7 @@ jobs:
           if-no-files-found: error
 
   release:
+    if: github.event_name != 'workflow_dispatch' || inputs.target == 'all'
     needs:
       - sync
       - build
