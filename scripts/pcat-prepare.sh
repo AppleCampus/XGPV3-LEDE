@@ -9,7 +9,7 @@ cp feeds.conf.default feeds.conf
 cat >> feeds.conf <<'EOF'
 
 src-git qmodem https://github.com/FUjr/QModem.git;main
-src-git pcat_packages https://github.com/photonicat/rockchip_rk3568_openwrt_packages.git;master
+src-git pcat_packages https://github.com/photonicat/rockchip_rk3568_openwrt_packages.git^1e1aa5bab1352e132dd39b0da5f6bae5293e1381
 EOF
 
 mkdir -p package/zz
