@@ -10,6 +10,21 @@ while read -r feed_name; do
   ./scripts/feeds install -a -p "${feed_name}"
 done < <(awk '$1 ~ /^src-/ && $2 != "qmodem" && $2 != "pcat_packages" { print $2 }' feeds.conf)
 ./scripts/feeds install -a -f -p qmodem
+
+echo "==> adapt Photonicat Python packages to LEDE"
+test -f feeds/packages/lang/python/pypi.mk
+test -f feeds/packages/lang/python/python3-package.mk
+for dependency in python-legacy-cgi python-blinker python-pam; do
+  source_makefile="feeds/pcat_packages/lang/python/${dependency}/Makefile"
+  test -f "${source_makefile}"
+  sed -i \
+    -e 's|^include ../pypi.mk$|include $(TOPDIR)/feeds/packages/lang/python/pypi.mk|' \
+    -e 's|^include ../python3-package.mk$|include $(TOPDIR)/feeds/packages/lang/python/python3-package.mk|' \
+    "${source_makefile}"
+  grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/pypi.mk' "${source_makefile}"
+  grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/python3-package.mk' "${source_makefile}"
+done
+
 ./scripts/feeds install -f -p pcat_packages \
   python3-legacy-cgi python3-blinker python3-pam
 
