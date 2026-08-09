@@ -231,9 +231,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release_assets
-          image_pattern="lede/bin/targets/rockchip/armv8/${{ matrix.image_glob }}"
-          compgen -G "$image_pattern" >/dev/null
-          cp $image_pattern release_assets/
+          image_dir="lede/bin/targets/rockchip/armv8"
+          image_pattern="${{ matrix.image_glob }}"
+          mapfile -t image_files < <(compgen -G "$image_dir/$image_pattern" || true)
+          if [ "${#image_files[@]}" -eq 0 ]; then
+            mapfile -t image_files < <(find "$image_dir" -maxdepth 1 -type f -name "*.img.gz" -print)
+          fi
+          if [ "${#image_files[@]}" -eq 0 ]; then
+            mapfile -t raw_images < <(find "$image_dir" -maxdepth 1 -type f -name "*.img" -print)
+            for raw_image in "${raw_images[@]}"; do
+              gzip -9 -c "$raw_image" > "${raw_image}.gz"
+              image_files+=("${raw_image}.gz")
+            done
+          fi
+          test "${#image_files[@]}" -gt 0
+          cp "${image_files[@]}" release_assets/
 
           for manifest in lede/bin/targets/rockchip/armv8/*.manifest; do
             [ -e "$manifest" ] || continue
