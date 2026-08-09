@@ -260,10 +260,9 @@ jobs:
           cp lede/.config "release_assets/${{ matrix.id }}.config.final"
           cp lede/feeds.conf "release_assets/${{ matrix.id }}.feeds.conf.final"
           [ ! -s lede/.pcat-source-sha ] || cp lede/.pcat-source-sha release_assets/photonicat-openwrt.source
-          cp lede/README.md release_assets/LEDE-README.md || true
-          cp lede/LICENSE release_assets/LEDE-LICENSE || true
-          curl -fsSL https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt \
-            -o release_assets/GPL-2.0.txt
+          [ ! -f lede/README.md ] || cp lede/README.md release_assets/LEDE-README.md
+          [ ! -f lede/LICENSE ] || cp lede/LICENSE release_assets/LEDE-LICENSE
+          echo "GPL-2.0 license text: https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt" > release_assets/GPL-2.0-LICENSE-INFO.txt
 
           {
             printf 'AppleCampus/LEDE commit: %s\n' '${{ needs.sync.outputs.synced_sha }}'
