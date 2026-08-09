@@ -24,7 +24,6 @@ for dependency in python-legacy-cgi python-blinker python-pam; do
   grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/pypi.mk' "${source_makefile}"
   grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/python3-package.mk' "${source_makefile}"
 done
-legacy_cgi_makefile="feeds/pcat_packages/lang/python/python-legacy-cgi/Makefile"
 
 legacy_cgi_makefile="feeds/pcat_packages/lang/python/python-legacy-cgi/Makefile"
 test -f "${legacy_cgi_makefile}"
