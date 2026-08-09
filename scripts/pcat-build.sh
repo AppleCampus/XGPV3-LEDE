@@ -24,7 +24,14 @@ for dependency in python-legacy-cgi python-blinker python-pam; do
   grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/pypi.mk' "${source_makefile}"
   grep -Fxq 'include $(TOPDIR)/feeds/packages/lang/python/python3-package.mk' "${source_makefile}"
 done
+legacy_cgi_makefile="feeds/pcat_packages/lang/python/python-legacy-cgi/Makefile"
 
+legacy_cgi_makefile="feeds/pcat_packages/lang/python/python-legacy-cgi/Makefile"
+test -f "${legacy_cgi_makefile}"
+if ! grep -Fxq 'PKG_BUILD_DEPENDS:=python-hatchling/host' "${legacy_cgi_makefile}"; then
+  sed -i '/^PKG_RELEASE:=/a PKG_BUILD_DEPENDS:=python-hatchling/host' "${legacy_cgi_makefile}"
+  fi
+  grep -Fxq 'PKG_BUILD_DEPENDS:=python-hatchling/host' "${legacy_cgi_makefile}"
 ./scripts/feeds install -f -p pcat_packages \
   python3-legacy-cgi python3-blinker python3-pam
 
