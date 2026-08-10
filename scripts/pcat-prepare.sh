@@ -60,10 +60,16 @@ for package_name in default-settings pcat-manager pcat-manager-web pcat2-display
   cp -a "$official_dir/package/lean/$package_name" "package/lean/$package_name"
 done
 
-target_dts=target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3576-photonicat2.dts
-test -s "$official_dir/$target_dts"
-mkdir -p "$(dirname "$target_dts")"
-cp "$official_dir/$target_dts" "$target_dts"
+target_dts_dir=target/linux/rockchip/files/arch/arm64/boot/dts/rockchip
+target_dts="$target_dts_dir/rk3576-photonicat2.dts"
+target_dtsi="$target_dts_dir/rk3576-extra.dtsi"
+mkdir -p "$target_dts_dir"
+for dts_name in rk3576-photonicat2.dts rk3576-extra.dtsi; do
+  test -s "$official_dir/$target_dts_dir/$dts_name"
+  cp "$official_dir/$target_dts_dir/$dts_name" "$target_dts_dir/$dts_name"
+done
+test -s "$target_dtsi"
+grep -Fq '#include "rk3576-extra.dtsi"' "$target_dts"
 grep -Fq 'brightness-levels = <' "$target_dts"
 grep -Fq 'default-brightness-level = <40>;' "$target_dts"
 grep -Fq 'fan {' "$target_dts"
