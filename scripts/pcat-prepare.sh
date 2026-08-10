@@ -8,7 +8,7 @@ echo "==> feeds.conf"
 cp feeds.conf.default feeds.conf
 cat >> feeds.conf <<'EOF'
 
-src-git qmodem https://github.com/FUjr/QModem.git;main
+src-git qmodem https://github.com/FUjr/QModem.git^667060a8f89d5e8e0bbfe95f5bd5607dc6699c7f
 src-git pcat_packages https://github.com/photonicat/rockchip_rk3568_openwrt_packages.git^1e1aa5bab1352e132dd39b0da5f6bae5293e1381
 EOF
 
@@ -80,7 +80,7 @@ sed -i 's|^PKG_SOURCE_DATE:=.*|PKG_SOURCE_DATE:=2026-06-11|' "$pcat_web_makefile
 sed -i 's|^PKG_SOURCE_VERSION:=.*|PKG_SOURCE_VERSION:=937c7ffedefce50e16e79d27de56b52099a508dc|' "$pcat_web_makefile"
 sed -i 's/^PKG_RELEASE:=.*/PKG_RELEASE:=47/' "$pcat_display_makefile"
 sed -i 's|^PKG_SOURCE_DATE:=.*|PKG_SOURCE_DATE:=2026-08-06|' "$pcat_display_makefile"
-sed -i 's|^PKG_SOURCE_VERSION:=.*|PKG_SOURCE_VERSION:=9d7bf9877545e50f016099d88633658e3dfc858b|' "$pcat_display_makefile"
+sed -i 's|^PKG_SOURCE_VERSION:=.*|PKG_SOURCE_VERSION:=9d7bf987754570abf6e021d6805aa8c442db52cd|' "$pcat_display_makefile"
 
 if ! grep -Fq '+libpam' "$pcat_web_makefile"; then
   sed -i '/+python3-pam/ s/+python3-pam/+python3-pam +libpam/' "$pcat_web_makefile"
