@@ -114,7 +114,6 @@ make download -j8 || make download -j1 V=s
 run_checked tools/compile "host tools"
 run_checked toolchain/compile "cross toolchain"
 run_checked target/compile "kernel and target"
-run_checked target/install "kernel image and DTS"
 run_checked package/feeds/pcat_packages/python-legacy-cgi/compile "python3-legacy-cgi compatibility"
 run_checked package/feeds/pcat_packages/python-blinker/compile "python3-blinker compatibility"
 run_checked package/feeds/pcat_packages/python-pam/compile "python3-pam compatibility"
