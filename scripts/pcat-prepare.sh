@@ -52,7 +52,7 @@ git -C "$official_dir" sparse-checkout set \
   package/lean/pcat-manager \
   package/lean/pcat-manager-web \
   package/lean/pcat2-display-mini \
-  target/linux/rockchip/files/arch/arm64/boot/dts/rockchip/rk3576-photonicat2.dts
+  target/linux/rockchip/files/arch/arm64/boot/dts/rockchip
 git -C "$official_dir" rev-parse HEAD > .pcat-source-sha
 
 for package_name in default-settings pcat-manager pcat-manager-web pcat2-display-mini; do
