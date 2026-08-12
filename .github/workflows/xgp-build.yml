@@ -285,44 +285,36 @@ jobs:
           path: release_assets/
           if-no-files-found: error
 
-  release:
-    if: github.event_name != 'workflow_dispatch' || inputs.target == 'all'
-    needs:
-      - sync
-      - build
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Download both firmware artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: '*-firmware'
-          path: release_assets
-          merge-multiple: true
-
-      - name: Verify release contents
-        run: |
-          set -e
-          test -n "$(find release_assets -maxdepth 1 -name '*nlnet_xiguapi-v3*.img.gz' -print -quit)"
-          test -n "$(find release_assets -maxdepth 1 -name '*ariaboard_photonicat2*.img.gz' -print -quit)"
-          ls -lah release_assets
-
-      - name: Create combined Release
+      - name: Release XGP V3 firmware
+        if: (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'xgpv3'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: firmware-${{ github.run_number }}-${{ github.run_id }}
+          tag_name: xgpv3-${{ github.run_number }}-${{ github.run_id }}
           target_commitish: ${{ needs.sync.outputs.synced_sha }}
-          name: XGPv3 + Photonicat2 ${{ github.run_number }}
+          name: XGP V3 firmware ${{ github.run_number }}
           body: |
-            ## XGP V3 and Photonicat 2 firmware
+            XGP V3 firmware built from AppleCampus/XGPV3-LEDE commit ${{ needs.sync.outputs.synced_sha }}, after syncing coolsnowwolf/lede commit ${{ needs.sync.outputs.upstream_sha }}.
 
-            Both images are built from AppleCampus/XGPV3-LEDE commit ${{ needs.sync.outputs.synced_sha }}, after syncing coolsnowwolf/lede commit ${{ needs.sync.outputs.upstream_sha }}.
-
-            - XGP V3 keeps the existing screen, Alpha theme, modem and Wi-Fi customizations.
-            - Photonicat 2 includes the official pcat-manager, pcat-manager-web and mini-display packages. The Photonicat WebUI uses port 80 and its OpenWrt entry opens LuCI on port 8080.
-            - Photonicat 2 defaults to 172.16.0.1 with root password photonicat, matching the official firmware.
-
-            License and source metadata are included with the images.
+            This release is independent of the Photonicat 2 build. A Photonicat failure does not block or remove the XGP V3 release.
           files: release_assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release Photonicat 2 firmware
+        if: (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'photonicat2'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: photonicat2-${{ github.run_number }}-${{ github.run_id }}
+          target_commitish: ${{ needs.sync.outputs.synced_sha }}
+          name: Photonicat 2 firmware ${{ github.run_number }}
+          body: |
+            Photonicat 2 firmware built from AppleCampus/XGPV3-LEDE commit ${{ needs.sync.outputs.synced_sha }}, after syncing coolsnowwolf/lede commit ${{ needs.sync.outputs.upstream_sha }}.
+
+            This release is independent of the XGP V3 build.
+          files: release_assets/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
