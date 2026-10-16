@@ -219,7 +219,7 @@ jobs:
           test -f package/kernel/mac80211/Makefile
           test -f package/kernel/mac80211/realtek.mk
           grep -Fq 'KLIB_BUILD="$(LINUX_DIR)"' package/kernel/mac80211/Makefile
-          grep -Fq 'PKG_DRIVERS += rtl8192d-common rtw88-8723x rtw89-8852b-common' package/kernel/mac80211/realtek.mk
+          for drv in rtl8192d-common rtw88-8723x rtw89-8852b-common; do grep -Fq "$drv" package/kernel/mac80211/realtek.mk; done
 
       - name: Build ${{ matrix.label }}
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
