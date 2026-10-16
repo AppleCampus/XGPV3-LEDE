@@ -80,7 +80,10 @@ jobs:
           done
 
           bash scripts/xgp-apply-patches.sh
-          git diff --check
+          # Only flag whitespace errors in files this sync step modifies.
+          # Upstream kernel patch files routinely contain lines (e.g. " \t"
+          # context lines) that git treats as whitespace errors.
+          git diff --check -- package/kernel/linux/modules/video.mk package/kernel/mac80211/realtek.mk .github/workflows/xgp-build.yml feeds.conf.default xgp.config scripts/
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "Sync upstream LEDE $UPSTREAM_SHA"
