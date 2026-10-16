@@ -6,9 +6,12 @@ PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=$(PROJECT_GIT)/project/firmware/qca-wireless.git
-PKG_SOURCE_DATE:=2026-05-18
-PKG_SOURCE_VERSION:=e20f4c6ff197823762319e4b7e31af01816503cf
-PKG_MIRROR_HASH:=a0109d830c474aeca2716496cb2eab05319c4d6671ae2d02c43449a94da183fa
+PKG_SOURCE_DATE:=2026-08-23
+PKG_SOURCE_VERSION:=0c67bbcca45f7fc00255dbb078754cac89d3f40e
+PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(subst -,.,$(PKG_SOURCE_DATE))~$(call version_abbrev,$(PKG_SOURCE_VERSION))
+PKG_SOURCE:=$(PKG_SOURCE_SUBDIR).tar.zst
+PKG_MIRROR_HASH:=5d9512363e5fc588f5861c116e889b4910e36bf89782aabd334ceb3e42806d66
+PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_SOURCE_SUBDIR)
 PKG_FLAGS:=nonshared
 
 include $(INCLUDE_DIR)/package.mk
@@ -34,6 +37,7 @@ ALLWIFIBOARDS:= \
 	aliyun_ap8220 \
 	anysafe_e1 \
 	arcadyan_aw1000 \
+	askey_sbe1v1k \
 	asus_rt-ax89x \
 	buffalo_wxr-5950ax12 \
 	cambiumnetworks_xe34 \
@@ -239,6 +243,7 @@ $(eval $(call generate-ipq-wifi-package,alibaba_ap4220,Alibaba AP4220))
 $(eval $(call generate-ipq-wifi-package,aliyun_ap8220,Aliyun AP8220))
 $(eval $(call generate-ipq-wifi-package,anysafe_e1,AnySafe E1))
 $(eval $(call generate-ipq-wifi-package,arcadyan_aw1000,Arcadyan AW1000))
+$(eval $(call generate-ipq-wifi-package,askey_sbe1v1k,Askey SBE1V1K))
 $(eval $(call generate-ipq-wifi-package,asus_rt-ax89x,Asus RT-AX89X))
 $(eval $(call generate-ipq-wifi-package,buffalo_wxr-5950ax12,Buffalo WXR-5950AX12))
 $(eval $(call generate-ipq-wifi-package,cambiumnetworks_xe34,Cambium Networks XE3-4))
