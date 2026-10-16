@@ -50,6 +50,15 @@ clone_or_pull https://github.com/derisamedia/luci-theme-alpha.git package/zz/luc
 clone_or_pull https://github.com/zzzz0317/kmod-fb-tft-gc9307.git package/zz/kmod-fb-tft-gc9307
 clone_or_pull https://github.com/zzzz0317/xgp-v3-screen.git package/zz/xgp-v3-screen
 
+# Linux 6.18 renamed struct platform_driver.remove_new back to .remove
+# (upstream zzzz0317/kmod-fb-tft-gc9307 still uses .remove_new).
+fb_h=package/zz/kmod-fb-tft-gc9307/src/fbtft.h
+sed -i 's/\.remove_new = fbtft_driver_remove_pdev,/.remove = fbtft_driver_remove_pdev,/' "$fb_h"
+grep -Fq '.remove = fbtft_driver_remove_pdev,' "$fb_h" || {
+  echo "ERROR: fbtft.h platform remove hook not in expected form; patch needs review." >&2
+  exit 1
+}
+
 echo "==> overlay files"
 # Keep repository files when present; otherwise fetch the default XGP overlay.
 if [ ! -d files/etc ]; then
