@@ -30,6 +30,33 @@ else
   echo "WARNING: qmodem modem_dial.sh not found; skipping auto-dial patch" >&2
 fi
 
+
+echo "==> QModem: validate netcard before creating wwan interfaces"
+if [ -n "$qmodem_dial_sh" ] && [ -f "$qmodem_dial_sh" ]; then
+  python3 - "$qmodem_dial_sh" <<'PYEOF2'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    c = f.read()
+old = '[ -z "$target_netcard" ] && target_netcard="$set_modem_netcard"'
+new = old + """
+    # XGP: do not create broken interfaces when netcard is missing
+    if [ -z "$target_netcard" ] || [ ! -d "/sys/class/net/$target_netcard" ]; then
+        m_debug "no valid netcard found (target_netcard='$target_netcard'); skipping interface setup"
+        qmodem_config_unlock
+        return 1
+    fi"""
+if new in c:
+    print("netcard validation already patched")
+elif old in c:
+    open(path, 'w').write(c.replace(old, new))
+    print("patched netcard validation")
+else:
+    print("ERROR: netcard patch target not found", file=sys.stderr)
+    sys.exit(1)
+PYEOF2
+fi
+
 echo "==> apply config"
 cp xgp.config .config
 make defconfig
