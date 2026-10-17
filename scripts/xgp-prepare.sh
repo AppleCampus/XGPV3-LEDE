@@ -94,6 +94,7 @@ ensure_config_package() {
 ensure_config_package CONFIG_PACKAGE_luci-app-alpha-config
 ensure_config_package CONFIG_PACKAGE_luci-theme-alpha
 ensure_config_package CONFIG_PACKAGE_luci-app-modem-webui-xgp
+ensure_config_package CONFIG_PACKAGE_xgp-wireless-defaults
 grep -Fxq 'CONFIG_PACKAGE_luci-app-alpha-config=y' xgp.config
 grep -Fxq 'CONFIG_PACKAGE_luci-theme-alpha=y' xgp.config
 
