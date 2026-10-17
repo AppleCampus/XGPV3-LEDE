@@ -57,9 +57,10 @@ jobs:
             scripts/xgp-build.sh \
             scripts/pcat-prepare.sh \
             scripts/pcat-build.sh \
-            scripts/xgp-apply-patches.sh; do
+            scripts/xgp-apply-patches.sh \
+            package/zz; do
             mkdir -p "$custom_dir/$(dirname "$path")"
-            cp "$path" "$custom_dir/$path"
+            cp -a "$path" "$custom_dir/$path"
           done
 
           git clone --depth 1 --branch "$UPSTREAM_BRANCH" "$UPSTREAM_REPO" "$upstream_dir"
@@ -74,9 +75,11 @@ jobs:
             scripts/xgp-build.sh \
             scripts/pcat-prepare.sh \
             scripts/pcat-build.sh \
-            scripts/xgp-apply-patches.sh; do
+            scripts/xgp-apply-patches.sh \
+            package/zz; do
             mkdir -p "$(dirname "$path")"
-            cp "$custom_dir/$path" "$path"
+            rm -rf "$path"
+            cp -a "$custom_dir/$path" "$path"
           done
 
           bash scripts/xgp-apply-patches.sh
