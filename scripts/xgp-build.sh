@@ -10,6 +10,26 @@ echo "==> feeds update/install"
 ./scripts/feeds install -a
 ./scripts/feeds install -a -f -p qmodem
 
+echo "==> QModem: default per-modem auto-dial to enabled when unset"
+# New modems get enable_dial=1 from modem_scand, but sections created by older
+# QModem lack it, leaving dial stuck at "sim card is ready". Default unset
+# per-modem enable_dial to 1 (an explicit '0' is still respected).
+qmodem_dial_sh=$(find package/feeds/qmodem -path "*usr/share/qmodem/modem_dial.sh" 2>/dev/null | head -1)
+if [ -n "$qmodem_dial_sh" ] && [ -f "$qmodem_dial_sh" ]; then
+  if grep -Fq 'config_get enable_dial $modem_config enable_dial "1"' "$qmodem_dial_sh"; then
+    echo "qmodem auto-dial default already patched"
+  else
+    sed -i 's/config_get enable_dial $modem_config enable_dial$/config_get enable_dial $modem_config enable_dial "1"/' "$qmodem_dial_sh"
+    grep -Fq 'config_get enable_dial $modem_config enable_dial "1"' "$qmodem_dial_sh" || {
+      echo "ERROR: qmodem auto-dial patch failed; patch needs review." >&2
+      exit 1
+    }
+    echo "patched $qmodem_dial_sh"
+  fi
+else
+  echo "WARNING: qmodem modem_dial.sh not found; skipping auto-dial patch" >&2
+fi
+
 echo "==> apply config"
 cp xgp.config .config
 make defconfig
