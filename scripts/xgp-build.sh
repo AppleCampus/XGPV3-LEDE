@@ -98,11 +98,75 @@ echo "ZZ_BUILD_DATE='$(date "+%Y-%m-%d %H:%M:%S %z")'" > files/etc/zz_build_id
 echo "ZZ_BUILD_HOST='$(hostname)'" >> files/etc/zz_build_id
 echo "ZZ_BUILD_LEDE_HASH='$(git rev-parse HEAD)'" >> files/etc/zz_build_id
 
-echo "==> download"
-make download -j8
+jobs=$(nproc)
+log_dir="${ROOT}/build-logs"
+mkdir -p "${log_dir}"
 
-echo "==> compile"
-make V=s -j"$(nproc)"
+# Make targets of the packages OpenWrt reported as failed in a build log:
+#   "ERROR: package/feeds/x/foo failed to build."        -> package/feeds/x/foo/compile
+#   "ERROR: package/feeds/x/foo [host] failed to build." -> package/feeds/x/foo/host/compile
+failed_targets() {
+  sed -nE \
+    -e 's#.*ERROR: ([^ ]+) \[([a-z]+)\] failed to build.*#\1/\2/compile#p' \
+    -e 't' \
+    -e 's#.*ERROR: ([^ ]+) failed to build.*#\1/compile#p' \
+    "$1" | sort -u
+}
+
+# Build a target in parallel. On failure, rebuild only the packages that
+# failed with -j1 V=s (readable log, and it gets past parallel-build races),
+# then resume in parallel. Rebuilding the whole target with -j1 V=s is only
+# the last resort, because it can take longer than the 6h job limit.
+# All logs go to build-logs/, which the workflow uploads when a build fails.
+# (Same helper as in pcat-build.sh; kept inline on purpose so no new file has
+# to be added to the sync preserve list.)
+run_checked() {
+  local target="$1"
+  local label="$2"
+  local log="${log_dir}/${target//\//_}.log"
+  local pkg
+  local -a failed=() broken=()
+
+  echo "==> ${label}: make ${target} -j${jobs}"
+  if make "${target}" -j"${jobs}" 2>&1 | tee "${log}"; then
+    return 0
+  fi
+
+  mapfile -t failed < <(failed_targets "${log}")
+  if [ "${#failed[@]}" -eq 0 ]; then
+    echo "::warning::${label} failed without naming a package; retrying make ${target} -j1 V=s"
+    make "${target}" -j1 V=s 2>&1 | tee -a "${log}"
+    return 0
+  fi
+
+  for pkg in "${failed[@]}"; do
+    echo "::group::${label}: retry ${pkg} with -j1 V=s"
+    if ! make "${pkg}" -j1 V=s 2>&1 | tee "${log_dir}/retry_${pkg//\//_}.log"; then
+      broken+=("${pkg}")
+    fi
+    echo "::endgroup::"
+  done
+
+  echo "==> ${label}: resuming make ${target} -j${jobs}"
+  if make "${target}" -j"${jobs}" 2>&1 | tee -a "${log}"; then
+    return 0
+  fi
+
+  if [ "${#broken[@]}" -gt 0 ]; then
+    for pkg in "${broken[@]}"; do
+      echo "::error::${label}: ${pkg} failed to build; see retry_${pkg//\//_}.log in the build-logs artifact"
+    done
+    return 1
+  fi
+
+  echo "::warning::${label} still fails in parallel; last resort make ${target} -j1 V=s"
+  make "${target}" -j1 V=s 2>&1 | tee -a "${log}"
+}
+
+echo "==> download"
+make download -j8 || make download -j1 V=s
+
+run_checked world "XGP V3 firmware"
 
 echo "==> outputs"
 ls -lah bin/targets/rockchip/armv8/ || true
