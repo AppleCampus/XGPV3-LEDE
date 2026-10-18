@@ -62,6 +62,7 @@ jobs:
             scripts/pcat-prepare.sh
             scripts/pcat-build.sh
             scripts/xgp-apply-patches.sh
+            scripts/qmodem-fixes.sh
             package/zz
           )
 
@@ -169,6 +170,7 @@ jobs:
           bash -n scripts/pcat-prepare.sh
           bash -n scripts/pcat-build.sh
           bash -n scripts/xgp-apply-patches.sh
+          bash -n scripts/qmodem-fixes.sh
 
       - name: Install build deps
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id

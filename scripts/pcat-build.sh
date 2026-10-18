@@ -11,43 +11,8 @@ while read -r feed_name; do
 done < <(awk '$1 ~ /^src-/ && $2 != "qmodem" && $2 != "pcat_packages" { print $2 }' feeds.conf)
 ./scripts/feeds install -a -f -p qmodem
 
-echo "==> QModem: default per-modem auto-dial to enabled when unset"
-# New modems get enable_dial=1 from modem_scand, but sections created by older
-# QModem lack it, leaving dial stuck at "sim card is ready". Default unset
-# per-modem enable_dial to 1 (an explicit '0' is still respected).
-qmodem_dial_sh=$(find package/feeds/qmodem -path "*usr/share/qmodem/modem_dial.sh" 2>/dev/null | head -1)
-if [ -n "$qmodem_dial_sh" ] && [ -f "$qmodem_dial_sh" ]; then
-  if grep -Fq 'config_get enable_dial $modem_config enable_dial "1"' "$qmodem_dial_sh"; then
-    echo "qmodem auto-dial default already patched"
-  else
-    sed -i 's/config_get enable_dial $modem_config enable_dial$/config_get enable_dial $modem_config enable_dial "1"/' "$qmodem_dial_sh"
-    grep -Fq 'config_get enable_dial $modem_config enable_dial "1"' "$qmodem_dial_sh" || {
-      echo "ERROR: qmodem auto-dial patch failed; patch needs review." >&2
-      exit 1
-    }
-    echo "patched $qmodem_dial_sh"
-  fi
-else
-  echo "WARNING: qmodem modem_dial.sh not found; skipping auto-dial patch" >&2
-fi
-
-echo "==> QModem: fix net device detection on kernel 6.18 (QMAP sysfs nesting)"
-# Kernel 6.18 nests QMAP child interface sysfs under the parent (e.g.
-# .../8-1:1.4/net/wwan0/net), causing `find "$modem_path" -name net` to return
-# 2 results instead of 1, which makes update_config bail out. Limit search
-# depth and add trailing slash (BusyBox find requires it to descend).
-if [ -n "$qmodem_dial_sh" ] && [ -f "$qmodem_dial_sh" ]; then
-  if grep -Fq 'find "$modem_path"/ -maxdepth 2 -name net' "$qmodem_dial_sh"; then
-    echo "qmodem 6.18 net detection already patched"
-  else
-    sed -i 's|find "$modem_path" -name net|find "$modem_path"/ -maxdepth 2 -name net|' "$qmodem_dial_sh"
-    grep -Fq 'find "$modem_path"/ -maxdepth 2 -name net' "$qmodem_dial_sh" || {
-      echo "ERROR: qmodem 6.18 net detection patch failed; patch needs review." >&2
-      exit 1
-    }
-    echo "patched $qmodem_dial_sh for 6.18 net detection"
-  fi
-fi
+echo "==> QModem fixes (auto-dial default, kernel 6.18 net detection)"
+bash scripts/qmodem-fixes.sh
 
 echo "==> adapt Photonicat Python packages to LEDE"
 test -f feeds/packages/lang/python/pypi.mk
