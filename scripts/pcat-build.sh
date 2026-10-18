@@ -31,6 +31,24 @@ else
   echo "WARNING: qmodem modem_dial.sh not found; skipping auto-dial patch" >&2
 fi
 
+echo "==> QModem: fix net device detection on kernel 6.18 (QMAP sysfs nesting)"
+# Kernel 6.18 nests QMAP child interface sysfs under the parent (e.g.
+# .../8-1:1.4/net/wwan0/net), causing `find "$modem_path" -name net` to return
+# 2 results instead of 1, which makes update_config bail out. Limit search
+# depth and add trailing slash (BusyBox find requires it to descend).
+if [ -n "$qmodem_dial_sh" ] && [ -f "$qmodem_dial_sh" ]; then
+  if grep -Fq 'find "$modem_path"/ -maxdepth 2 -name net' "$qmodem_dial_sh"; then
+    echo "qmodem 6.18 net detection already patched"
+  else
+    sed -i 's|find "$modem_path" -name net|find "$modem_path"/ -maxdepth 2 -name net|' "$qmodem_dial_sh"
+    grep -Fq 'find "$modem_path"/ -maxdepth 2 -name net' "$qmodem_dial_sh" || {
+      echo "ERROR: qmodem 6.18 net detection patch failed; patch needs review." >&2
+      exit 1
+    }
+    echo "patched $qmodem_dial_sh for 6.18 net detection"
+  fi
+fi
+
 echo "==> adapt Photonicat Python packages to LEDE"
 test -f feeds/packages/lang/python/pypi.mk
 test -f feeds/packages/lang/python/python3-package.mk
