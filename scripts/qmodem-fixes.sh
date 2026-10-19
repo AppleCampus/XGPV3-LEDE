@@ -39,31 +39,36 @@ grep -Eq '^[[:space:]]*config_get enable_dial \$modem_config enable_dial "?1"?[[
   || fail "the enable_dial default patch no longer applies to ${dial_sh}; review it"
 echo "    enable_dial defaults to 1 when unset"
 
-# 2) Kernel 6.18 also lists the QMAP child interfaces in a net/ directory
-#    nested under the modem's own net device (.../8-1:1.4/net/wwan0/net), so
-#    `find <modem path> -name net` returns two directories: current QModem
-#    gives up (dial stuck at "sim card is ready", modem_netdev.sh fails) and
-#    the older one picks the nested directory (`tail -1`). Skip net/
-#    directories that sit inside another net/ directory. Unlike -maxdepth this
-#    does not depend on how deep net/ is, so PCIe/MHI modems keep working.
-#    The trailing slash on $modem_path makes BusyBox find descend into the
-#    /sys/bus/... symlink.
-nested_skip="! -path '*/net/*'"
+# 2) Pick the QMAP child as the data interface. Vendor drivers register it
+#    in a net/ directory under the modem's own net device, e.g.
+#    .../8-1:1.4/net/wwan0/net/wwan0_1 (qmi_wwan_q; RM520N/RM500Q always use
+#    it) or .../net/rmnet_mhi0/net/rmnet_mhi0.1 (PCIe/MHI). quectel-CM puts
+#    the address on that child, and QModem derives the control interface
+#    from its name (wwan0_1 -> wwan0, rmnet_mhi0.1 -> rmnet_mhi0), so netifd
+#    must use the child: DHCP on wwan0 never gets a lease, which leaves the
+#    modem without DNS and outside the wan firewall zone ("no internet").
+#    Older QModem got this with `find ... -name net | tail -1`. Current QModem
+#    requires exactly one net/ directory and gives up as soon as the child
+#    exists (dial stuck at "sim card is ready"). Restore the old choice: keep
+#    the last, i.e. deepest, net/ directory. This is not specific to any
+#    kernel version. The trailing slash on $modem_path makes BusyBox find
+#    descend into the /sys/bus/... symlink.
 net_find_re='find .*-name net([[:space:])|]|$)'
+picks_child_re='-name net[^|]*[|] ?tail -(n ?)?1'
 mapfile -t net_files < <(grep -rlE -- "${net_find_re}" "${qm_files}" || true)
-[ "${#net_files[@]}" -gt 0 ] || fail "no 'find ... -name net' found; review the 6.18 net detection fix"
+[ "${#net_files[@]}" -gt 0 ] || fail "no 'find ... -name net' found; review the QMAP net detection fix"
 for f in "${net_files[@]}"; do
   sed -i -E \
     -e "/${net_find_re}/ {" \
-    -e "  /\\*\\/net\\/\\*/! s#-name net([[:space:])|]|\$)#-name net ${nested_skip}\\1#" \
+    -e '  /tail -(n ?)?1/! s#(find [^)|]*-name net[^)|]*)\)#\1 | tail -n 1)#' \
     -e '  s#find "\$modem_path" #find "$modem_path"/ #' \
     -e '  s#find \$modem_path #find $modem_path/ #' \
     -e '}' "$f"
 done
-if grep -rnE -- "${net_find_re}" "${qm_files}" | grep -vF -- "${nested_skip}"; then
-  fail "the 'find ... -name net' above was not patched; review the 6.18 net detection fix"
+if grep -rnE -- "${net_find_re}" "${qm_files}" | grep -vE -- "${picks_child_re}"; then
+  fail "the 'find ... -name net' above does not pick the QMAP child; review the QMAP net detection fix"
 fi
-grep -qF -- "-name net ${nested_skip}" "${dial_sh}" \
-  || fail "net device detection in ${dial_sh} changed upstream; review the 6.18 net detection fix"
-grep -rnF -- "${nested_skip}" "${qm_files}" | sed 's/^/    /'
-echo "    nested net/ directories (kernel 6.18 QMAP) are ignored"
+grep -qE -- "${picks_child_re}" "${dial_sh}" \
+  || fail "net device detection in ${dial_sh} changed upstream; review the QMAP net detection fix"
+grep -rnE -- "${net_find_re}" "${qm_files}" | sed 's/^/    /'
+echo "    the QMAP child (deepest net/ directory) is used as the data interface"
