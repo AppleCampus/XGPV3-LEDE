@@ -237,16 +237,6 @@ jobs:
           bash "scripts/${{ matrix.build_script }}"
           df -h
 
-      # Save even when the build fails, otherwise a target that keeps failing
-      # (Photonicat 2) never gets a cache.
-      - name: Save dl cache
-        if: always() && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id)
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: lede/dl
-          key: dl-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
-
       - name: Upload ${{ matrix.label }} build logs
         if: failure() && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id)
         uses: actions/upload-artifact@v4
@@ -352,3 +342,34 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The dl cache is saved last, after firmware, logs and releases are
+      # uploaded, so it can never cost a finished build. actions/cache stages
+      # its archive in RUNNER_TEMP on the small root disk (maximize-build-space
+      # only enlarges the workspace); filling that disk killed the runner, so
+      # only save when the archive clearly fits. Saved even when the build
+      # failed, otherwise a target that keeps failing never gets a cache.
+      - name: Check room for dl cache
+        id: dlcache
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id)
+        run: |
+          dl_kb=$(du -sk lede/dl 2>/dev/null | cut -f1 || true)
+          dl_kb=${dl_kb:-0}
+          root_kb=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
+          work_kb=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')
+          info="dl $((dl_kb / 1024)) MiB, root disk free $((root_kb / 1024)) MiB, workspace free $((work_kb / 1024)) MiB"
+          # Keep at least 2 GiB free on the root disk after the archive is written.
+          if [ "$dl_kb" -gt 0 ] && [ "$root_kb" -gt $((dl_kb + 2 * 1024 * 1024)) ]; then
+            echo "::notice title=dl cache::saving ($info)"
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=dl cache::skipped, needs dl size + 2 GiB free on the root disk ($info)"
+          fi
+
+      - name: Save dl cache
+        if: always() && steps.dlcache.outputs.save == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: lede/dl
+          key: dl-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}

@@ -65,12 +65,35 @@ ensure_config_package CONFIG_PACKAGE_kmod-aic8800-usb
 ensure_config_package CONFIG_PACKAGE_luci-app-alpha-config
 ensure_config_package CONFIG_PACKAGE_luci-theme-alpha
 
+disable_config_package() {
+  local package_option="$1"
+  sed -i "/^# ${package_option} is not set$/d" .config
+  sed -i "/^${package_option}=/d" .config
+  printf '# %s is not set\n' "$package_option" >> .config
+}
+
+# xgp.config follows QModem main, whose luci-app-qmodem-sms uses
+# sms-forwarder-next. Photonicat pins an older QModem whose luci-app-qmodem-sms
+# still selects sms-forwarder. Both install /etc/init.d/sms_forwarder, so
+# keeping both breaks package/install at the very end of a 3h build. Keep only
+# the one this QModem's SMS app depends on.
+qmodem_sms_makefile=feeds/qmodem/luci/luci-app-qmodem-sms/Makefile
+if [ -f "$qmodem_sms_makefile" ] && grep -q '+sms-forwarder-next' "$qmodem_sms_makefile"; then
+  disable_config_package CONFIG_PACKAGE_sms-forwarder
+else
+  disable_config_package CONFIG_PACKAGE_sms-forwarder-next
+fi
+
 make defconfig
 
 echo "==> verify Photonicat 2 selection"
 grep -Fxq 'CONFIG_TARGET_rockchip_armv8_DEVICE_ariaboard_photonicat2=y' .config
 if grep -Fxq 'CONFIG_TARGET_rockchip_armv8_DEVICE_nlnet_xiguapi-v3=y' .config; then
   echo 'ERROR: XGP V3 target remained selected in Photonicat build.' >&2
+  exit 1
+fi
+if grep -Fxq 'CONFIG_PACKAGE_sms-forwarder=y' .config && grep -Fxq 'CONFIG_PACKAGE_sms-forwarder-next=y' .config; then
+  echo '::error::sms-forwarder and sms-forwarder-next are both selected; they install the same files and package/install would fail at the end of the build.'
   exit 1
 fi
 grep -Fxq 'CONFIG_PACKAGE_pcat-manager=y' .config
@@ -113,6 +136,49 @@ failed_targets() {
     "$1" | sort -u
 }
 
+# Show the lines that explain a failure as ::error:: annotations, so the cause
+# is visible on the run page without downloading the build-logs artifact:
+# opkg errors from package/install (file clashes, missing dependencies),
+# packages OpenWrt reports as failed, compiler errors and a full disk.
+# $3 = head|tail: which matches to keep (first ones for a single package,
+# last ones for a whole-target log).
+report_errors() {
+  local label="$1"
+  local file="$2"
+  local pick="${3:-tail}"
+  local line
+  [ -f "${file}" ] || return 0
+  # Reporting must never be what fails the build (e.g. SIGPIPE from head).
+  awk '
+    /Collected errors:/ { grab = 1; next }
+    grab && /^[ \t]+(\*|But that file)/ { print; next }
+    { grab = 0 }
+    /ERROR: .* failed to build/ || /No space left on device/ || /(^|[^A-Za-z-])error: / { print }
+  ' "${file}" | sed -E 's/^[[:space:]]+//; s/%/%25/g' | awk '!seen[$0]++' | "${pick}" -n 10 |
+    while IFS= read -r line; do
+      printf '::error title=%s::%s\n' "${label}" "${line}"
+    done || true
+}
+
+# Last-resort make -j1 V=s of a whole target. The output goes only to the log
+# file: a verbose rebuild of `world` prints gigabytes, which floods the job log
+# and the runner's small root disk. On failure, print the tail and annotate
+# the error lines.
+verbose_make() {
+  local target="$1"
+  local label="$2"
+  local log="$3"
+  echo "    full output goes to build-logs/${log##*/} (uploaded as the build-logs artifact)"
+  if make "${target}" -j1 V=s >> "${log}" 2>&1; then
+    return 0
+  fi
+  echo "::group::${label}: last 200 lines of make ${target} -j1 V=s"
+  tail -n 200 "${log}"
+  echo "::endgroup::"
+  report_errors "${label}" "${log}" tail
+  return 1
+}
+
 # Build a target in parallel. On failure, rebuild only the packages that
 # failed with -j1 V=s (readable log, and it gets past parallel-build races),
 # then resume in parallel. Rebuilding the whole target with -j1 V=s is only
@@ -122,7 +188,7 @@ run_checked() {
   local target="$1"
   local label="$2"
   local log="${log_dir}/${target//\//_}.log"
-  local pkg
+  local pkg retry_log
   local -a failed=() broken=()
 
   echo "==> ${label}: make ${target} -j${jobs}"
@@ -133,7 +199,7 @@ run_checked() {
   mapfile -t failed < <(failed_targets "${log}")
   if [ "${#failed[@]}" -eq 0 ]; then
     echo "::warning::${label} failed without naming a package; retrying make ${target} -j1 V=s"
-    make "${target}" -j1 V=s 2>&1 | tee -a "${log}"
+    verbose_make "${target}" "${label}" "${log}" || return 1
     return 0
   fi
 
@@ -152,13 +218,15 @@ run_checked() {
 
   if [ "${#broken[@]}" -gt 0 ]; then
     for pkg in "${broken[@]}"; do
-      echo "::error::${label}: ${pkg} failed to build; see retry_${pkg//\//_}.log in the build-logs artifact"
+      retry_log="${log_dir}/retry_${pkg//\//_}.log"
+      echo "::error::${label}: ${pkg} failed to build; see ${retry_log##*/} in the build-logs artifact"
+      report_errors "${pkg}" "${retry_log}" head
     done
     return 1
   fi
 
   echo "::warning::${label} still fails in parallel; last resort make ${target} -j1 V=s"
-  make "${target}" -j1 V=s 2>&1 | tee -a "${log}"
+  verbose_make "${target}" "${label}" "${log}" || return 1
 }
 
 echo "==> download"
