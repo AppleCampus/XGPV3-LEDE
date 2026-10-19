@@ -65,6 +65,27 @@ echo "DISTRIB_REVISION='R${year}.${month}.${day}.${hour}'" >> /etc/openwrt_relea
 /bin/sync
 EOF
 
+# mwan3 2.12 ships the upstream example config: all traffic goes to policy
+# 'balanced', whose only enabled member is the Ethernet wan, and a policy
+# without last_resort marks traffic unreachable while no member is online.
+# With the WAN port unplugged and only a modem connected, plain ping fails
+# with "Network unreachable", dnsmasq answers REFUSED and LAN clients have no
+# internet. The old mwan3 2.8 config fell back to the main routing table
+# (last_resort 'default'); do the same for policies that leave it unset.
+# uci-defaults run again after every sysupgrade, so kept configs are fixed too.
+cat > files/etc/uci-defaults/zz-mwan3-last-resort <<'EOF'
+#!/bin/sh
+[ -f /etc/config/mwan3 ] || exit 0
+changed=0
+for p in $(uci -q -X show mwan3 | sed -n 's/^mwan3\.\([^.=]*\)=policy$/\1/p'); do
+	[ -n "$(uci -q get "mwan3.$p.last_resort")" ] && continue
+	uci set "mwan3.$p.last_resort=default"
+	changed=1
+done
+[ "$changed" = 0 ] || uci commit mwan3
+exit 0
+EOF
+
 echo "ZZ_BUILD_DATE='$(date "+%Y-%m-%d %H:%M:%S %z")'" > files/etc/zz_build_id
 echo "ZZ_BUILD_HOST='$(hostname)'" >> files/etc/zz_build_id
 echo "ZZ_BUILD_LEDE_HASH='$(git rev-parse HEAD)'" >> files/etc/zz_build_id
