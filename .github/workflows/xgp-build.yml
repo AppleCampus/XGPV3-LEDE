@@ -25,6 +25,7 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     outputs:
       synced_sha: ${{ steps.sync.outputs.synced_sha }}
       upstream_sha: ${{ steps.sync.outputs.upstream_sha }}
@@ -33,7 +34,7 @@ jobs:
       UPSTREAM_BRANCH: master
     steps:
       - name: Checkout LEDE fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           path: lede
@@ -49,55 +50,68 @@ jobs:
           upstream_dir=/tmp/lede-upstream
           rm -rf "$custom_dir" "$upstream_dir"
 
-          for path in \
-            .github/workflows/xgp-build.yml \
-            feeds.conf.default \
-            xgp.config \
-            scripts/xgp-prepare.sh \
-            scripts/xgp-build.sh \
-            scripts/pcat-prepare.sh \
-            scripts/pcat-build.sh \
-            scripts/xgp-apply-patches.sh \
-            package/zz; do
+          # Single source of truth for custom files that must survive the
+          # upstream `rsync --delete` below. Anything not listed here is
+          # replaced or deleted by upstream, so add new custom paths here.
+          keep_paths=(
+            .github/workflows/xgp-build.yml
+            feeds.conf.default
+            xgp.config
+            scripts/xgp-prepare.sh
+            scripts/xgp-build.sh
+            scripts/pcat-prepare.sh
+            scripts/pcat-build.sh
+            scripts/xgp-apply-patches.sh
+            scripts/qmodem-fixes.sh
+            package/zz
+          )
+
+          for path in "${keep_paths[@]}"; do
+            if [ ! -e "$path" ]; then
+              echo "::warning::Custom path '$path' does not exist; nothing to preserve"
+              continue
+            fi
             mkdir -p "$custom_dir/$(dirname "$path")"
             cp -a "$path" "$custom_dir/$path"
           done
 
           git clone --depth 1 --branch "$UPSTREAM_BRANCH" "$UPSTREAM_REPO" "$upstream_dir"
           UPSTREAM_SHA=$(git -C "$upstream_dir" rev-parse HEAD)
-          rsync -a --delete --exclude='.git/' "$upstream_dir/" ./
+          # .github/ is never taken from upstream: it holds our workflow, and
+          # the GITHUB_TOKEN used for the push below is not allowed to commit
+          # changes to workflow files, so any upstream change there would make
+          # the push fail.
+          rsync -a --delete --exclude='.git/' --exclude='/.github/' "$upstream_dir/" ./
 
-          for path in \
-            .github/workflows/xgp-build.yml \
-            feeds.conf.default \
-            xgp.config \
-            scripts/xgp-prepare.sh \
-            scripts/xgp-build.sh \
-            scripts/pcat-prepare.sh \
-            scripts/pcat-build.sh \
-            scripts/xgp-apply-patches.sh \
-            package/zz; do
+          for path in "${keep_paths[@]}"; do
+            [ -e "$custom_dir/$path" ] || continue
             mkdir -p "$(dirname "$path")"
             rm -rf "$path"
             cp -a "$custom_dir/$path" "$path"
           done
 
           bash scripts/xgp-apply-patches.sh
-          # Only flag whitespace errors in files this sync step modifies.
-          # Upstream kernel patch files routinely contain lines (e.g. " \t"
-          # context lines) that git treats as whitespace errors.
-          git diff --check -- package/kernel/linux/modules/video.mk package/kernel/mac80211/realtek.mk .github/workflows/xgp-build.yml feeds.conf.default xgp.config scripts/
+          # Report whitespace problems in our own files and in the two upstream
+          # files patched above, but never fail the sync for them: the diff
+          # also contains upstream changes, and upstream whitespace (e.g. in
+          # scripts/) used to abort the whole run here with exit code 2.
+          if ! git diff --check -- package/kernel/linux/modules/video.mk package/kernel/mac80211/realtek.mk "${keep_paths[@]}"; then
+            echo "::warning::git diff --check reported whitespace issues (non-fatal)"
+          fi
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "Sync upstream LEDE $UPSTREAM_SHA"
           fi
-          git push origin HEAD:master
+          # Push back to the branch this run was started from (master for
+          # scheduled runs), so test runs on other branches never touch master.
+          git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "synced_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
 
   build:
     needs: sync
     runs-on: ubuntu-24.04
+    timeout-minutes: 340
     strategy:
       fail-fast: false
       matrix:
@@ -141,7 +155,7 @@ jobs:
 
       - name: Checkout synced LEDE source
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.sync.outputs.synced_sha }}
           path: lede
@@ -156,7 +170,7 @@ jobs:
           bash -n scripts/pcat-prepare.sh
           bash -n scripts/pcat-build.sh
           bash -n scripts/xgp-apply-patches.sh
-          git diff --check
+          bash -n scripts/qmodem-fixes.sh
 
       - name: Install build deps
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
@@ -183,18 +197,17 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
           df -h
 
-      - name: Cache dl / staging
+      # Only the source download cache is kept. Caching staging_dir alone does
+      # not skip the host tools / toolchain build (OpenWrt re-checks them
+      # against the freshly checked-out sources), it only wasted cache quota.
+      - name: Restore dl cache
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: |
-            lede/dl
-            lede/staging_dir/host
-            lede/staging_dir/hostpkg
-            lede/staging_dir/toolchain-*
-          key: ${{ matrix.id }}-${{ runner.os }}-${{ needs.sync.outputs.upstream_sha }}-${{ hashFiles('lede/feeds.conf.default', 'lede/xgp.config') }}
+          path: lede/dl
+          key: dl-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ${{ matrix.id }}-${{ runner.os }}-
+            dl-${{ matrix.id }}-
 
       - name: Prepare ${{ matrix.label }}
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
@@ -217,11 +230,24 @@ jobs:
 
       - name: Build ${{ matrix.label }}
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
+        timeout-minutes: 300
         working-directory: lede
         run: |
           set -e
           bash "scripts/${{ matrix.build_script }}"
           df -h
+
+      - name: Upload ${{ matrix.label }} build logs
+        if: failure() && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.id }}-build-logs
+          path: |
+            lede/build-logs/
+            lede/.config
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
 
       - name: Collect ${{ matrix.label }} artifacts
         if: github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id
@@ -283,7 +309,8 @@ jobs:
           if-no-files-found: error
 
       - name: Release XGP V3 firmware
-        if: (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'xgpv3'
+        # Only publish from master; test runs on other branches stop at the artifact upload.
+        if: github.ref == 'refs/heads/master' && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'xgpv3'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: xgpv3-${{ github.run_number }}-${{ github.run_id }}
@@ -300,7 +327,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Photonicat 2 firmware
-        if: (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'photonicat2'
+        if: github.ref == 'refs/heads/master' && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id) && matrix.id == 'photonicat2'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: photonicat2-${{ github.run_number }}-${{ github.run_id }}
@@ -315,3 +342,34 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The dl cache is saved last, after firmware, logs and releases are
+      # uploaded, so it can never cost a finished build. actions/cache stages
+      # its archive in RUNNER_TEMP on the small root disk (maximize-build-space
+      # only enlarges the workspace); filling that disk killed the runner, so
+      # only save when the archive clearly fits. Saved even when the build
+      # failed, otherwise a target that keeps failing never gets a cache.
+      - name: Check room for dl cache
+        id: dlcache
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == matrix.id)
+        run: |
+          dl_kb=$(du -sk lede/dl 2>/dev/null | cut -f1 || true)
+          dl_kb=${dl_kb:-0}
+          root_kb=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
+          work_kb=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')
+          info="dl $((dl_kb / 1024)) MiB, root disk free $((root_kb / 1024)) MiB, workspace free $((work_kb / 1024)) MiB"
+          # Keep at least 2 GiB free on the root disk after the archive is written.
+          if [ "$dl_kb" -gt 0 ] && [ "$root_kb" -gt $((dl_kb + 2 * 1024 * 1024)) ]; then
+            echo "::notice title=dl cache::saving ($info)"
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=dl cache::skipped, needs dl size + 2 GiB free on the root disk ($info)"
+          fi
+
+      - name: Save dl cache
+        if: always() && steps.dlcache.outputs.save == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: lede/dl
+          key: dl-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
