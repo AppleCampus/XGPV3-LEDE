@@ -64,6 +64,7 @@ ensure_config_package CONFIG_PACKAGE_pcat2-display-mini
 ensure_config_package CONFIG_PACKAGE_kmod-aic8800-usb
 ensure_config_package CONFIG_PACKAGE_luci-app-alpha-config
 ensure_config_package CONFIG_PACKAGE_luci-theme-alpha
+ensure_config_package CONFIG_PACKAGE_luci-theme-design
 
 disable_config_package() {
   local package_option="$1"
@@ -129,6 +130,19 @@ for p in $(uci -q -X show mwan3 | sed -n 's/^mwan3\.\([^.=]*\)=policy$/\1/p'); d
 	changed=1
 done
 [ "$changed" = 0 ] || uci commit mwan3
+exit 0
+EOF
+
+# Default LuCI theme: Design. Applied once; the marker in /etc/config/luci
+# survives sysupgrade, so a theme picked later by the user is kept.
+cat > files/etc/uci-defaults/zzzzz-luci-theme-design <<'EOF'
+#!/bin/sh
+[ -d /www/luci-static/design ] || exit 0
+[ "$(uci -q get luci.main.default_theme_set)" = design ] && exit 0
+uci set luci.themes.Design=/luci-static/design
+uci set luci.main.mediaurlbase=/luci-static/design
+uci set luci.main.default_theme_set=design
+uci commit luci
 exit 0
 EOF
 

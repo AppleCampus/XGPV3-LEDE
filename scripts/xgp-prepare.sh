@@ -93,10 +93,12 @@ ensure_config_package() {
 
 ensure_config_package CONFIG_PACKAGE_luci-app-alpha-config
 ensure_config_package CONFIG_PACKAGE_luci-theme-alpha
+ensure_config_package CONFIG_PACKAGE_luci-theme-design
 ensure_config_package CONFIG_PACKAGE_luci-app-modem-webui-xgp
 ensure_config_package CONFIG_PACKAGE_xgp-wireless-defaults
 grep -Fxq 'CONFIG_PACKAGE_luci-app-alpha-config=y' xgp.config
 grep -Fxq 'CONFIG_PACKAGE_luci-theme-alpha=y' xgp.config
+grep -Fxq 'CONFIG_PACKAGE_luci-theme-design=y' xgp.config
 
 # panfrost on 6.12+ requires drm_shmem_helper.
 if grep -q 'CONFIG_PACKAGE_kmod-drm-panfrost=y' xgp.config; then

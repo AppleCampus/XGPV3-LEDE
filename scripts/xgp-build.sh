@@ -86,6 +86,19 @@ done
 exit 0
 EOF
 
+# Default LuCI theme: Design. Applied once; the marker in /etc/config/luci
+# survives sysupgrade, so a theme picked later by the user is kept.
+cat > files/etc/uci-defaults/zzzzz-luci-theme-design <<'EOF'
+#!/bin/sh
+[ -d /www/luci-static/design ] || exit 0
+[ "$(uci -q get luci.main.default_theme_set)" = design ] && exit 0
+uci set luci.themes.Design=/luci-static/design
+uci set luci.main.mediaurlbase=/luci-static/design
+uci set luci.main.default_theme_set=design
+uci commit luci
+exit 0
+EOF
+
 echo "ZZ_BUILD_DATE='$(date "+%Y-%m-%d %H:%M:%S %z")'" > files/etc/zz_build_id
 echo "ZZ_BUILD_HOST='$(hostname)'" >> files/etc/zz_build_id
 echo "ZZ_BUILD_LEDE_HASH='$(git rev-parse HEAD)'" >> files/etc/zz_build_id
