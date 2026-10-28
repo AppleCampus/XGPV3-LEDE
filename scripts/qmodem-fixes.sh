@@ -53,10 +53,22 @@ echo "    enable_dial defaults to 1 when unset"
 #    the last, i.e. deepest, net/ directory. This is not specific to any
 #    kernel version. The trailing slash on $modem_path makes BusyBox find
 #    descend into the /sys/bus/... symlink.
+#    QModem main since e00a306 (2026-10-20) does this itself: dialing uses
+#    modem_netdev.sh, which skips a net device that has its own net/ child.
+#    That file is then left alone; other `find ... -name net` uses still get
+#    the fix.
 net_find_re='find .*-name net([[:space:])|]|$)'
 picks_child_re='-name net[^|]*[|] ?tail -(n ?)?1'
-mapfile -t net_files < <(grep -rlE -- "${net_find_re}" "${qm_files}" || true)
-[ "${#net_files[@]}" -gt 0 ] || fail "no 'find ... -name net' found; review the QMAP net detection fix"
+netdev_sh="${qm_dir}/modem_netdev.sh"
+native_child=0
+if [ -f "${netdev_sh}" ] && grep -Fq '[ ! -d "$entry/net" ]' "${netdev_sh}"; then
+  grep -Fq 'modem_netdev.sh' "${dial_sh}" \
+    || fail "modem_netdev.sh picks the QMAP child but ${dial_sh} no longer uses it; review the QMAP net detection fix"
+  native_child=1
+  echo "    upstream modem_netdev.sh already picks the QMAP child"
+fi
+mapfile -t net_files < <(grep -rlE -- "${net_find_re}" "${qm_files}" | { [ "${native_child}" = 1 ] && grep -vFx -- "${netdev_sh}" || cat; } || true)
+[ "${#net_files[@]}" -gt 0 ] || [ "${native_child}" = 1 ] || fail "no 'find ... -name net' found; review the QMAP net detection fix"
 for f in "${net_files[@]}"; do
   sed -i -E \
     -e "/${net_find_re}/ {" \
@@ -65,10 +77,12 @@ for f in "${net_files[@]}"; do
     -e '  s#find \$modem_path #find $modem_path/ #' \
     -e '}' "$f"
 done
-if grep -rnE -- "${net_find_re}" "${qm_files}" | grep -vE -- "${picks_child_re}"; then
+if [ "${#net_files[@]}" -gt 0 ] && grep -nE -- "${net_find_re}" "${net_files[@]}" | grep -vE -- "${picks_child_re}"; then
   fail "the 'find ... -name net' above does not pick the QMAP child; review the QMAP net detection fix"
 fi
-grep -qE -- "${picks_child_re}" "${dial_sh}" \
-  || fail "net device detection in ${dial_sh} changed upstream; review the QMAP net detection fix"
-grep -rnE -- "${net_find_re}" "${qm_files}" | sed 's/^/    /'
+if [ "${native_child}" = 0 ]; then
+  grep -qE -- "${picks_child_re}" "${dial_sh}" \
+    || fail "net device detection in ${dial_sh} changed upstream; review the QMAP net detection fix"
+fi
+[ "${#net_files[@]}" -eq 0 ] || grep -nE -- "${net_find_re}" "${net_files[@]}" | sed 's/^/    /'
 echo "    the QMAP child (deepest net/ directory) is used as the data interface"

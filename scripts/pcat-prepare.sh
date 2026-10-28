@@ -45,14 +45,27 @@ fi
 echo "==> official Photonicat packages and hardware DTS"
 official_dir=/tmp/photonicat-openwrt
 rm -rf "$official_dir"
-git clone --depth 1 --filter=blob:none --sparse \
-  https://github.com/photonicat/photonicat_openwrt.git "$official_dir"
+# Pinned: on 2026-10-19 (8e2455d7) upstream moved pcat-manager,
+# pcat-manager-web and pcat2-display-mini to package/pcat/ and updated their
+# init/defaults files for newer sources. The package sources below are pinned
+# to known-good revisions, so keep the matching packaging from the last
+# commit before that move. Bump both together after testing on hardware.
+PCAT_OPENWRT_SHA=873643193f8105e92e3a33cddc4377c94d09846c
+git init -q "$official_dir"
+git -C "$official_dir" remote add origin https://github.com/photonicat/photonicat_openwrt.git
+git -C "$official_dir" sparse-checkout init --cone
 git -C "$official_dir" sparse-checkout set \
   package/lean/default-settings \
   package/lean/pcat-manager \
   package/lean/pcat-manager-web \
   package/lean/pcat2-display-mini \
   target/linux/rockchip/files/arch/arm64/boot/dts/rockchip
+for attempt in 1 2 3; do
+  git -C "$official_dir" fetch -q --depth 1 --filter=blob:none origin "$PCAT_OPENWRT_SHA" && break
+  [ "$attempt" = 3 ] && { echo "ERROR: cannot fetch photonicat_openwrt $PCAT_OPENWRT_SHA" >&2; exit 1; }
+  sleep 10
+done
+git -C "$official_dir" checkout -q FETCH_HEAD
 git -C "$official_dir" rev-parse HEAD > .pcat-source-sha
 
 for package_name in default-settings pcat-manager pcat-manager-web pcat2-display-mini; do
