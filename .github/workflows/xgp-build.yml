@@ -307,6 +307,10 @@ jobs:
           name: ${{ matrix.id }}-firmware
           path: release_assets/
           if-no-files-found: error
+          # Firmware is also published to a GitHub Release below (release
+          # assets do not count toward Actions storage). Keep the artifact
+          # copy only 1 day to stop it accruing GB-hours at the 90-day default.
+          retention-days: 1
 
       - name: Release XGP V3 firmware
         # Only publish from master; test runs on other branches stop at the artifact upload.
